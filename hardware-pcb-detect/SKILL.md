@@ -29,13 +29,14 @@ Output concise Chinese conclusions first, then evidence and fixes.
 12. Append a cost table at the end of `tasklist.txt`.
 13. Use generic analysis as the only profile and keep checks module-agnostic.
 14. Apply schematic reasonability heuristics for optimization opportunities (decoupling density, pull-up/pull-down completeness, connector protection).
-15. Append a Chinese `#PCB整体评分` section in `tasklist.txt` with traceable score breakdown and recommendation grade.
-16. Append Chinese power analysis and error analysis sections in `tasklist.txt`.
-17. For power analysis, parse component datasheets (when available), identify power topology from netlist, and apply layout-aware penalties from Gerber net span data.
-18. In `tasklist.txt`, include Chinese stage-level power breakdown (Vin->Vout, Iout, Pout, Ploss, efficiency, parameter source).
-19. In `tasklist.txt`, append a netlist-driven section `#基于网表的PCB布局建议与注意事项` with concrete layout guidance and cautions.
-20. Read generated analysis bundle and tasklist.
-21. Return conclusion first in Chinese.
+15. Append a Chinese `#Schematic整体评分` section in `tasklist.txt` before `#PCB整体评分`, with traceable score breakdown and recommendation grade.
+16. Append a Chinese `#PCB整体评分` section in `tasklist.txt` with traceable score breakdown and recommendation grade.
+17. Append Chinese power analysis and error analysis sections in `tasklist.txt`.
+18. For power analysis, parse component datasheets (when available), identify power topology from netlist, and apply layout-aware penalties from Gerber net span data.
+19. In `tasklist.txt`, include Chinese stage-level power breakdown (Vin->Vout, Iout, Pout, Ploss, efficiency, parameter source).
+20. In `tasklist.txt`, append a netlist-driven section `#基于网表的PCB布局建议与注意事项` with concrete layout guidance and cautions.
+21. Read generated analysis bundle and tasklist.
+22. Return conclusion first in Chinese.
 
 ## Input Contract
 Required:
@@ -60,7 +61,7 @@ Unsupported or limited:
 Must output files:
 - Module root folder: `tasklist.txt` (not inside `pcb_data`)
 - `tasklist.txt` must include a cost table at the end
-- `tasklist.txt` must include `#PCB整体评分` with a 0-100 score, breakdown rows, and recommendation grade
+- `tasklist.txt` must include `#Schematic整体评分` before `#PCB整体评分`, each with a 0-100 score, breakdown rows, and recommendation grade
 - `tasklist.txt` must include `#功耗分析` and `#误差分析` sections in Chinese
 - `tasklist.txt` must include `#基于网表的PCB布局建议与注意事项` with actionable suggestions
 - Datasheet folder: `datasheet/*.pdf` and `_datasheet_sync_report.json`
@@ -112,7 +113,7 @@ python scripts/run_pcb_detect.py ... --file-manage yes --file-manage-apply
 - Keep summary short.
 - Group details by severity.
 - Use Chinese task style in `tasklist.txt`.
-- Keep PCB score traceable: show deduction items and avoid opaque black-box scoring.
+- Keep Schematic and PCB scores traceable: show deduction items and avoid opaque black-box scoring.
 - Keep power section headings and table items in Chinese.
 - Log mode defaults to off to avoid disk growth.
 - Keep the skill module-agnostic; do not hardcode project-specific or ADC-only assumptions.

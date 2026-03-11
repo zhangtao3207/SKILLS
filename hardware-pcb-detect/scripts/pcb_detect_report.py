@@ -882,10 +882,88 @@ def pcb_score_grade(score: int) -> str:
     return "不建议直接下单"
 
 
-def build_pcb_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[str, object]:
-    counts = counts_by_severity(findings)
+POSITIVE_SCORE_TITLES = {
+    "AGND-DGND bridge identified",
+    "Current channel input range acceptable",
+    "Gerber key layers present",
+    "Impedance readiness acceptable",
+    "ISO_GND reference bridge identified",
+    "Resistor electrical load acceptable",
+    "Signal chain connectivity looks consistent",
+    "Single analog ground domain",
+    "Single digital ground domain",
+    "Voltage channel input range acceptable",
+}
+
+SCHEMATIC_SCORE_TITLES = {
+    "Control nets may lack pull bias",
+    "Current channel input boundary risk",
+    "External interface protection may be weak",
+    "Ground domain naming incomplete",
+    "High fanout nets detected",
+    "I2C pull-up may be missing",
+    "Impedance input data incomplete",
+    "Isolation boundary shorted",
+    "Multiple AGND-DGND bridges",
+    "Netlist missing",
+    "Potential floating nets detected",
+    "Power decoupling density can improve",
+    "Power decoupling missing on supply nets",
+    "Resistor power risk",
+    "Resistor thermal margin warning",
+    "Voltage channel input boundary risk",
+    "Voltage current calculation incomplete",
+}
+
+PCB_SCORE_TITLES = {
+    "Flying probe fields incomplete",
+    "Gerber layer completeness failure",
+    "Gerber missing",
+    "HV-LV spacing estimate",
+    "No flying probe geometry",
+    "No pin geometry in flying probe",
+    "Spacing estimate unavailable",
+    "Spacing scope insufficient",
+}
+
+
+def looks_like_gerber_source(source: str) -> bool:
+    s = source.lower()
+    if not s:
+        return False
+    gerber_tokens = (".zip", ".gtl", ".gbl", ".gko", ".drl", "_gerber_analyse", "gerber")
+    return any(token in s for token in gerber_tokens)
+
+
+def finding_score_domains(finding: dict) -> Set[str]:
+    title = str(finding.get("title", ""))
+    source = str(finding.get("source", ""))
+    domains: Set[str] = set()
+    if title in PCB_SCORE_TITLES or looks_like_gerber_source(source):
+        domains.add("pcb")
+    if title in SCHEMATIC_SCORE_TITLES:
+        domains.add("schematic")
+    return domains
+
+
+def score_counts_for_domain(findings: List[dict], domain: str) -> Dict[str, int]:
+    counts = {"high": 0, "medium": 0, "low": 0, "info": 0}
+    for finding in findings:
+        severity = str(finding.get("severity", "")).lower()
+        title = str(finding.get("title", ""))
+        if severity not in counts:
+            continue
+        if title in POSITIVE_SCORE_TITLES:
+            continue
+        if domain not in finding_score_domains(finding):
+            continue
+        counts[severity] += 1
+    return counts
+
+
+def build_score_rows(base_note: str, counts: Dict[str, int]) -> Tuple[int, List[List[str]]]:
     score = 100
-    rows: List[List[str]] = [["基础分", "+100", "风险和规则修正前的基准分"]]
+    rows: List[List[str]] = [["基础分", "+100", base_note]]
 
     def apply_delta(item: str, delta: int, note: str) -> None:
         nonlocal score
@@ -907,6 +985,68 @@ def build_pcb_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[st
     else:
         rows.append(["低风险项", "+0", "无低风险项"])
 
+    return score, rows
+
+
+def schematic_score_grade(score: int) -> str:
+    if score >= 90:
+        return "原理图可行性高"
+    if score >= 80:
+        return "原理图基本可用"
+    if score >= 70:
+        return "原理图需整改复核"
+    return "原理图风险较高"
+
+
+def build_schematic_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[str, object]:
+    counts = score_counts_for_domain(findings, "schematic")
+    score, rows = build_score_rows("原理图规则修正前的基准分", counts)
+
+    def apply_delta(item: str, delta: int, note: str) -> None:
+        nonlocal score
+        score += delta
+        rows.append([item, f"{delta:+d}", note])
+
+    power_model = metrics.get("power_model", {}) if isinstance(metrics.get("power_model"), dict) else {}
+    stage_count = int(power_model.get("stage_count", 0) or 0) if isinstance(power_model, dict) else 0
+    if stage_count <= 0:
+        apply_delta("功耗建模修正", -4, "未识别到可计算的电源拓扑级")
+    else:
+        rows.append(["功耗建模修正", "+0", f"已识别到 {stage_count} 级电源拓扑"])
+
+    decouple = metrics.get("schematic_power_decoupling", {}) if isinstance(metrics.get("schematic_power_decoupling"), dict) else {}
+    no_decouple = decouple.get("nets_no_decouple", []) if isinstance(decouple, dict) else []
+    weak_decouple = decouple.get("nets_weak_decouple", []) if isinstance(decouple, dict) else []
+    if isinstance(no_decouple, list) and no_decouple:
+        sample = "、".join(str(item) for item in no_decouple[:3])
+        apply_delta("供电去耦修正", -6, f"未识别到去耦的供电网络 {sample}")
+    elif isinstance(weak_decouple, list) and weak_decouple:
+        sample = "、".join(str(item) for item in weak_decouple[:3])
+        apply_delta("供电去耦修正", -3, f"去耦密度偏低的供电网络 {sample}")
+    else:
+        rows.append(["供电去耦修正", "+0", "未发现明显的供电去耦短板"])
+
+    score = max(0, min(100, int(round(score))))
+    grade = schematic_score_grade(score)
+    summary = f"总分 {score}/100，评级 {grade}"
+    return {
+        "score": score,
+        "grade": grade,
+        "rows": rows,
+        "summary": summary,
+        "counts": counts,
+    }
+
+
+def build_pcb_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[str, object]:
+    counts = score_counts_for_domain(findings, "pcb")
+    score, rows = build_score_rows("Gerber与PCB规则修正前的基准分", counts)
+
+    def apply_delta(item: str, delta: int, note: str) -> None:
+        nonlocal score
+        score += delta
+        rows.append([item, f"{delta:+d}", note])
+
     spacing_mm = metrics.get("min_hv_lv_edge_mm")
     if isinstance(spacing_mm, (int, float)):
         spacing_mm_f = float(spacing_mm)
@@ -919,13 +1059,6 @@ def build_pcb_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[st
     else:
         apply_delta("安全间距修正", -4, "缺少可计算的高低压间距数据")
 
-    power_model = metrics.get("power_model", {}) if isinstance(metrics.get("power_model"), dict) else {}
-    stage_count = int(power_model.get("stage_count", 0) or 0) if isinstance(power_model, dict) else 0
-    if stage_count <= 0:
-        apply_delta("功耗建模修正", -4, "未识别到可计算的电源拓扑级")
-    else:
-        rows.append(["功耗建模修正", "+0", f"已识别 {stage_count} 级电源拓扑"])
-
     score = max(0, min(100, int(round(score))))
     grade = pcb_score_grade(score)
     summary = f"总分 {score}/100，评级 {grade}"
@@ -936,6 +1069,25 @@ def build_pcb_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[st
         "summary": summary,
         "counts": counts,
     }
+
+
+def append_schematic_score(lines_task: List[str], score_data: Dict[str, object]) -> None:
+    rows = score_data.get("rows", [])
+    score = int(score_data.get("score", 0) or 0)
+    grade = str(score_data.get("grade", ""))
+    summary = str(score_data.get("summary", ""))
+
+    lines_task.append("")
+    lines_task.append("#Schematic整体评分")
+    lines_task.append(f"评分 {score}/100")
+    lines_task.append(f"评级 {grade}")
+    append_ascii_table(
+        lines_task,
+        ["评分项", "分值变化", "说明"],
+        rows if isinstance(rows, list) else [],
+        right_cols={1},
+    )
+    lines_task.append(f"评分结论 {summary}")
 
 
 def append_pcb_score(lines_task: List[str], score_data: Dict[str, object]) -> None:
@@ -1209,8 +1361,10 @@ def write_outputs(
     counts = counts_by_severity(findings)
     overall = overall_level(findings)
     ordered = sorted_findings(findings)
-    score_data = build_pcb_score(findings, metrics)
-    metrics["pcb_score"] = score_data
+    schematic_score_data = build_schematic_score(findings, metrics)
+    pcb_score_data = build_pcb_score(findings, metrics)
+    metrics["schematic_score"] = schematic_score_data
+    metrics["pcb_score"] = pcb_score_data
 
     current_tasks = build_current_tasks(findings)
     previous_tasks = load_previous_tasks(log_dir) if (log_mode_on and log_dir is not None) else {}
@@ -1258,7 +1412,8 @@ def write_outputs(
         lines_task.append("#历史追踪")
         lines_task.append("日志模式已关闭 不保留历史任务记录")
 
-    append_pcb_score(lines_task, score_data)
+    append_schematic_score(lines_task, schematic_score_data)
+    append_pcb_score(lines_task, pcb_score_data)
     append_cost_table(lines_task, metrics, args.bom)
     append_power_analysis(lines_task, metrics)
     append_error_analysis(lines_task, metrics)

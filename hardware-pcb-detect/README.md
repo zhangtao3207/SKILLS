@@ -4,11 +4,11 @@
 |---|---|
 | 技能名称 | hardware-pcb-detect |
 | 主要用途 | 基于网表、Gerber 和模块文档检查原理合理性、PCB 可制造性和布局风险，并输出可执行改进建议 |
-| 适用场景 | 接地与隔离策略检查、高低压间距评估、信号链完整性、功耗分析、误差分析、PCB 整体评分 |
+| 适用场景 | 接地与隔离策略检查、高低压间距评估、信号链完整性、功耗分析、误差分析、Schematic 整体评分、PCB 整体评分 |
 | 必要输入 | 网表 `.tel`，模块说明 `.txt` |
 | 可选输入 | Gerber `.zip`，BOM `.csv/.xlsx/.xls`，贴片文件 |
 | 主要输出 | `tasklist.txt`、`datasheet/*.pdf`、`datasheet/_datasheet_sync_report.json`、`datasheet/_component_info_cache.json`、`*_gerber_analyse/*` |
-| 输出特点 | 结论优先，中文任务风格，按严重级别分组，包含 PCB 整体评分、成本表、功耗分析、误差分析、网表驱动布局建议 |
+| 输出特点 | 结论优先，中文任务风格，按严重级别分组，包含 Schematic 整体评分、PCB 整体评分、成本表、功耗分析、误差分析、网表驱动布局建议 |
 
 | 常用命令 | 示例 |
 |---|---|
