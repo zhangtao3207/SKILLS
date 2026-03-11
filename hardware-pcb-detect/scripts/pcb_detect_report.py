@@ -872,6 +872,91 @@ def counts_by_severity(findings: List[dict]) -> Dict[str, int]:
     return counts
 
 
+def pcb_score_grade(score: int) -> str:
+    if score >= 90:
+        return "可直接打样"
+    if score >= 80:
+        return "适合打样验证"
+    if score >= 70:
+        return "整改后可打样"
+    return "不建议直接下单"
+
+
+def build_pcb_score(findings: List[dict], metrics: Dict[str, object]) -> Dict[str, object]:
+    counts = counts_by_severity(findings)
+    score = 100
+    rows: List[List[str]] = [["基础分", "+100", "风险和规则修正前的基准分"]]
+
+    def apply_delta(item: str, delta: int, note: str) -> None:
+        nonlocal score
+        score += delta
+        rows.append([item, f"{delta:+d}", note])
+
+    if counts["high"] > 0:
+        apply_delta("高风险项", -22 * counts["high"], f"{counts['high']} 项，每项扣 22 分")
+    else:
+        rows.append(["高风险项", "+0", "无高风险项"])
+
+    if counts["medium"] > 0:
+        apply_delta("中风险项", -8 * counts["medium"], f"{counts['medium']} 项，每项扣 8 分")
+    else:
+        rows.append(["中风险项", "+0", "无中风险项"])
+
+    if counts["low"] > 0:
+        apply_delta("低风险项", -2 * counts["low"], f"{counts['low']} 项，每项扣 2 分")
+    else:
+        rows.append(["低风险项", "+0", "无低风险项"])
+
+    spacing_mm = metrics.get("min_hv_lv_edge_mm")
+    if isinstance(spacing_mm, (int, float)):
+        spacing_mm_f = float(spacing_mm)
+        if spacing_mm_f < 6.0:
+            apply_delta("安全间距修正", -10, f"最小高低压间距 {spacing_mm_f:.3f} mm，小于 6.0 mm")
+        elif spacing_mm_f < 8.0:
+            apply_delta("安全间距修正", -3, f"最小高低压间距 {spacing_mm_f:.3f} mm，介于 6.0 到 8.0 mm")
+        else:
+            rows.append(["安全间距修正", "+0", f"最小高低压间距 {spacing_mm_f:.3f} mm，达到 8.0 mm 余量"])
+    else:
+        apply_delta("安全间距修正", -4, "缺少可计算的高低压间距数据")
+
+    power_model = metrics.get("power_model", {}) if isinstance(metrics.get("power_model"), dict) else {}
+    stage_count = int(power_model.get("stage_count", 0) or 0) if isinstance(power_model, dict) else 0
+    if stage_count <= 0:
+        apply_delta("功耗建模修正", -4, "未识别到可计算的电源拓扑级")
+    else:
+        rows.append(["功耗建模修正", "+0", f"已识别 {stage_count} 级电源拓扑"])
+
+    score = max(0, min(100, int(round(score))))
+    grade = pcb_score_grade(score)
+    summary = f"总分 {score}/100，评级 {grade}"
+    return {
+        "score": score,
+        "grade": grade,
+        "rows": rows,
+        "summary": summary,
+        "counts": counts,
+    }
+
+
+def append_pcb_score(lines_task: List[str], score_data: Dict[str, object]) -> None:
+    rows = score_data.get("rows", [])
+    score = int(score_data.get("score", 0) or 0)
+    grade = str(score_data.get("grade", ""))
+    summary = str(score_data.get("summary", ""))
+
+    lines_task.append("")
+    lines_task.append("#PCB整体评分")
+    lines_task.append(f"评分 {score}/100")
+    lines_task.append(f"评级 {grade}")
+    append_ascii_table(
+        lines_task,
+        ["评分项", "分值变化", "说明"],
+        rows if isinstance(rows, list) else [],
+        right_cols={1},
+    )
+    lines_task.append(f"评分结论 {summary}")
+
+
 def sorted_findings(findings: List[dict]) -> List[dict]:
     return sorted(findings, key=lambda f: (-severity_rank(f["severity"]), f["title"]))
 
@@ -1124,6 +1209,8 @@ def write_outputs(
     counts = counts_by_severity(findings)
     overall = overall_level(findings)
     ordered = sorted_findings(findings)
+    score_data = build_pcb_score(findings, metrics)
+    metrics["pcb_score"] = score_data
 
     current_tasks = build_current_tasks(findings)
     previous_tasks = load_previous_tasks(log_dir) if (log_mode_on and log_dir is not None) else {}
@@ -1171,6 +1258,7 @@ def write_outputs(
         lines_task.append("#历史追踪")
         lines_task.append("日志模式已关闭 不保留历史任务记录")
 
+    append_pcb_score(lines_task, score_data)
     append_cost_table(lines_task, metrics, args.bom)
     append_power_analysis(lines_task, metrics)
     append_error_analysis(lines_task, metrics)
