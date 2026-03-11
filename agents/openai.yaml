@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hardware PCB Detect"
+  short_description: "Check Gerber and netlist feasibility, spacing, grounding, and electrical risk"
+  default_prompt: "Read Gerber zip, netlist tel, and module docs; output concise conclusion, risk levels, and actionable PCB fixes."

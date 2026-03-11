@@ -1,0 +1,5 @@
+﻿__pycache__/
+scripts/__pycache__/
+*.pyc
+log/
+tmp/state/
